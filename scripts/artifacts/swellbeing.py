@@ -1,30 +1,25 @@
 __artifacts_v2__ = {
     "samsung_wellbeing": {
         "name": "Samsung Digital Wellbeing",
-        "description": "Parses Samsung Digital Wellbeing app usage events (timestamp, event ID, package and event type) from dwbCommon.db.",
+        "description": "Parses Samsung Digital Wellbeing usage events from the usageEvents table of dwbCommon.db (timestamp, event ID, package and event type).",
         "author": "@abrignoni, @Adam-Hachem",
         "creation_date": "2020-05-21",
-        "last_update_date": "2026-10-15",
+        "last_update_date": "2026-11-22",
         "requirements": "none",
         "category": "Digital Wellbeing",
         "notes": (
-            "Event-type labels are taken from the AOSP UsageEvents.Event constant names "
+            "Timestamp is usageEvents.timeStamp read as Unix milliseconds and shown in UTC; that unit is not sourced from the app's code. Event-type labels are taken from the AOSP UsageEvents.Event constant names "
             "(reference: AOSP, UsageEvents.java at tag android-14.0.0_r1, "
             "https://android.googlesource.com/platform/frameworks/base/+/refs/tags/android-14.0.0_r1/core/java/android/app/usage/UsageEvents.java#104) "
             "and applied to the stored codes. The labels for codes 1 and 2 each show two constant "
             "names, which that file defines with the same value. "
-            "Samsung's implementation is not documented and its codes are not verified to match "
-            "those constants, so the labels are unverified. An event type with no matching label "
+            "No Samsung source for these codes was used, and they are not verified to match those constants, so the labels are unverified. An event type with no matching label "
             "is shown as stored. Package Name is read from the pkgName column of usageEvents where "
-            "the database has one, and otherwise joined from foundPackages on pkgId. The pkgName "
-            "column was described in a report from @Adam-Hachem of a Samsung Android 16 "
-            "extraction that is not in the corpus; no database with it has been examined here. No registered image has "
-            "it, so that path was run only against a copy of the anne_a15 (Android 15) database "
-            "with pkgId renamed to pkgName and filled with the package names from foundPackages. "
+            "the database has one, and otherwise joined from foundPackages on pkgId. The pkgName column was reported by @Adam-Hachem. samsung_a166u_a16_known_20261117 (Android 16) has it in the databases of Android users 0 and 150 (4,561 and 62 rows, and no row is in both), and every row there has a Package Name. samsung_a166u_a16_known_20261116 (Android 16) has pkgId. "
             "An event whose package id has no row in "
-            "foundPackages is reported with a blank Package Name; no event on the five tested "
-            "images was in that state. A database present under several storage paths "
+            "foundPackages is reported with a blank Package Name; no event on galaxys10_a10, samsungs20_a13 or samsung_a166u_a16_known_20261116 was in that state. A database present under several storage paths "
             "(data/data, data/user/0, data_mirror) is read once. "
+            "Android User is the user number in the path of the database: n under data/user/<n>, data/user_de/<n>, userdata/user/<n>, userdata/user_de/<n>, data_mirror/data_ce/<volume>/<n> or data_mirror/data_de/<volume>/<n>, and 0 under data/data or userdata/data. It is blank for any other path. That includes a rollback copy under data/misc_ce/<n>/rollback. A rollback copy is read unless the live database was also found and the two files and their -wal and -journal match. No sample_data image had a rollback copy of dwbCommon.db, so the blank case is unexercised. samsung_a166u_a16_known_20261117 has users 0 and 150. The other six sample_data images have 0 on every row. "
             "A label names a recorded transition and does not by itself establish a user "
             "action."
         ),
@@ -37,17 +32,19 @@ __artifacts_v2__ = {
             "samsunga53_a14": "Android 14 | com.samsung.android.forest | 2307 rows",
             "samsungs20_a13": "Android 13 | com.samsung.android.forest | 554 rows",
             "sharon_a14": "Android 14 | com.samsung.android.forest vc 510200008 | 3187 rows",
+            "samsung_a166u_a16_known_20261116": "Android 16 | com.samsung.android.forest | 3689 rows",
+            "samsung_a166u_a16_known_20261117": "Android 16 | com.samsung.android.forest | 4623 rows",
         },
     },
     "samsung_wellbeing_timezone": {
         "name": "Samsung Digital Wellbeing - Timezone Changes",
-        "description": "Parses Samsung Digital Wellbeing timezone changes from dwbCommon.db.",
+        "description": "Timezone changes Samsung Digital Wellbeing logged in dwbCommon.db under the UsageDataManager::timeZoneChanged() key.",
         "author": "Kevin Pagano (@stark4n6)",
         "creation_date": "2026-08-03",
-        "last_update_date": "2026-08-03",
+        "last_update_date": "2026-11-22",
         "requirements": "none",
         "category": "Digital Wellbeing",
-        "notes": (),
+        "notes": "Reads Logging rows whose key contains UsageDataManager::timeZoneChanged() from the first dwbCommon.db found, with the previous and new timezone split from the value. A change logged under another key is not reported: on samsungs20_a13 one Logging row holds a previous and new timezone under a different key, and this artifact reports no rows. An empty result does not show that no timezone change happened. Timestamp is Logging.timeStamp, converted by a shared helper that picks the unit from the value's size, and shown in UTC.",
         "paths": ('*/com.samsung.android.forest/databases/dwbCommon.db*',),
         "output_types": "standard",
         "artifact_icon": "clock",
@@ -62,7 +59,7 @@ __artifacts_v2__ = {
                        "packages it covers, the daily limit and the stored days and state, from dwbCommon.db.",
         "author": "@AlexisBrignoni, Claude",
         "creation_date": "2026-11-16",
-        "last_update_date": "2026-11-16",
+        "last_update_date": "2026-11-22",
         "requirements": "none",
         "category": "Digital Wellbeing",
         "notes": "One row per app timer and schedule row: apptimer_table of com.samsung.android.forest/"
@@ -72,9 +69,7 @@ __artifacts_v2__ = {
                  "whose observer_id names no timer is not; both paths are in the code and were not run "
                  "against real data. Timer Name and Packages are apptimer_table.timer_name and package_name "
                  "as stored; on the known-data image the timer covering two apps stored them separated by a "
-                 "comma and a space. Daily Limit (minutes) is apptimer_schedule_table.time_limit. Schedule "
-                 "Days (as stored) is its enable_days bit field; the mapping of single bits to weekdays is "
-                 "not established. Known data on samsung_a166u_a16_known_20261116 ties the values to the "
+                 "comma and a space. Daily Limit (minutes) is apptimer_schedule_table.time_limit. Schedule Days (as stored) is its enable_days value; how that value maps to weekdays is not established. Known data on samsung_a166u_a16_known_20261116 ties the values to the "
                  "settings made on the phone: a timer set for 1 minute every day stored time_limit 1 and "
                  "enable_days 127, and one set for 30 minutes Monday to Friday stored 30 and 62 (bits 1 to "
                  "5). The Logging table records the same allowances as remainingUsage 60000 and 1800000 "
@@ -94,8 +89,7 @@ __artifacts_v2__ = {
                  "columns; they were empty on both rows and are not read. Nine of the ten other images "
                  "checked have no apptimer_schedule_table and no timers, so where a timer's limit is stored "
                  "on those builds is not established, and such a timer would be reported with a blank Daily "
-                 "Limit and Schedule Days. Rows from several Android users are reported together and no "
-                 "column names the user; the report's source paths list each database read. Observer ID "
+                 "Limit and Schedule Days. Android User is the user number in the path of the database: n under data/user/<n>, data/user_de/<n>, userdata/user/<n>, userdata/user_de/<n>, data_mirror/data_ce/<volume>/<n> or data_mirror/data_de/<volume>/<n>, and 0 under data/data or userdata/data. It is blank for any other path. That includes a rollback copy under data/misc_ce/<n>/rollback. A rollback copy is read unless the live database was also found and the two files and their -wal and -journal match. No sample_data image had a rollback copy of dwbCommon.db, so the blank case is unexercised. The 2 rows on samsung_a166u_a16_known_20261116, the only sample_data image with rows, have Android User 0. A non-zero value is unexercised for this artifact. Observer ID "
                  "and Schedule ID held the same values on both rows of the known-data image; they are "
                  "separate keys (apptimer_table.observer_id and apptimer_schedule_table.scheduleId). Not "
                  "reported: appTimerWidget, focusModeHistory, DailyBedTimeSchedule, drivingCustomizedApp, "
@@ -128,7 +122,7 @@ __artifacts_v2__ = {
                        "timer's remaining usage or a usage limit being reached.",
         "author": "@AlexisBrignoni, Claude",
         "creation_date": "2026-11-16",
-        "last_update_date": "2026-11-16",
+        "last_update_date": "2026-11-22",
         "requirements": "none",
         "category": "Digital Wellbeing",
         "notes": "Rows of the Logging table of com.samsung.android.forest/databases/dwbCommon.db whose "
@@ -139,8 +133,7 @@ __artifacts_v2__ = {
                  "Logging rows by a key that the known-data image does not use, so that image's timezone "
                  "line is not reported by either artifact. Timestamp is Logging.timeStamp read as Unix "
                  "milliseconds. Packages, Remaining Usage and usedInMin are parsed from the value text, which "
-                 "is shown in full in Log Value (as stored); these are the app's own log lines and their "
-                 "format is not documented. Remaining Usage is in milliseconds: the 1-minute and 30-minute "
+                 "is shown in full in Log Value (as stored); no source for the format of these log lines was used. Remaining Usage is in milliseconds: the 1-minute and 30-minute "
                  "timers of the known-data image logged 60000 and 1800000. usedInMin was 0 on every row, so "
                  "its unit is taken from the field name only. On samsung_a166u_a16_known_20261116 the rows "
                  "fall at the times timers were created (15:16:11 and 15:17:45 UTC, within 2 s of the mint "
@@ -149,8 +142,7 @@ __artifacts_v2__ = {
                  "brought to the front at 15:17:57), and at 18:16:32 for the second timer, 13 s after a "
                  "BOOT_COMPLETED row and 8 s before the Date value in the UFED .ufd (18:16:40 UTC). The "
                  "APP_USAGE_LIMIT_REACHED row does not name a package. A row does not by itself show that a "
-                 "person set or met a limit. Rows from several Android users are reported together and no "
-                 "column names the user. No Logging row on the ten other images checked matched either "
+                 "person set or met a limit. Android User is the user number in the path of the database: n under data/user/<n>, data/user_de/<n>, userdata/user/<n>, userdata/user_de/<n>, data_mirror/data_ce/<volume>/<n> or data_mirror/data_de/<volume>/<n>, and 0 under data/data or userdata/data. It is blank for any other path. That includes a rollback copy under data/misc_ce/<n>/rollback. A rollback copy is read unless the live database was also found and the two files and their -wal and -journal match. No sample_data image had a rollback copy of dwbCommon.db, so the blank case is unexercised. The 5 rows on samsung_a166u_a16_known_20261116, the only sample_data image with rows, have Android User 0. A non-zero value is unexercised for this artifact. No Logging row on the ten other images checked matched either "
                  "shape.",
         "paths": ('*/com.samsung.android.forest/databases/dwbCommon.db*',),
         "output_types": "standard",
@@ -176,7 +168,7 @@ import re
 import sqlite3
 
 from scripts.ilapfuncs import artifact_processor, open_sqlite_db_readonly, convert_unix_ts_to_utc, get_sqlite_db_records, get_file_path, logfunc
-from scripts.artifacts.storagePathViews import unique_files
+from scripts.artifacts.storagePathViews import android_user, unique_files
 
 
 @artifact_processor
@@ -196,7 +188,7 @@ def samsung_wellbeing(context):
         cursor = db.cursor()
         columns = {row[1] for row in cursor.execute('PRAGMA table_info(usageEvents)')}
         if 'pkgName' in columns:
-            # A user report describes a build that stores the package name on the event row.
+            # samsung_a166u_a16_known_20261117 stores the package name on the event row.
             package_column = 'usageEvents.pkgName'
             package_join = ''
         elif 'pkgId' in columns:
@@ -254,12 +246,14 @@ def samsung_wellbeing(context):
         all_rows = cursor.fetchall()
         db.close()
         source_paths.append(file_found)
+        user = android_user(context.get_relative_path(file_found))
 
         for row in all_rows:
             timestamp = datetime.datetime.fromtimestamp(int(row[0]) / 1000, datetime.timezone.utc) if row[0] else ''
-            data_list.append((timestamp, row[1], row[2], row[3], row[4]))
+            data_list.append((timestamp, row[1], row[2], row[3], row[4], user))
 
-    data_headers = (('Timestamp', 'datetime'), 'Event ID', 'Package Name', 'Event Type', 'Event Type Description')
+    data_headers = (('Timestamp', 'datetime'), 'Event ID', 'Package Name', 'Event Type', 'Event Type Description',
+                    'Android User')
     return data_headers, data_list, '\n'.join(source_paths)
 
 @artifact_processor
@@ -342,6 +336,7 @@ def samsung_wellbeing_app_timers(context):
         finally:
             db.close()
 
+        user = android_user(context.get_relative_path(file_found))
         for timer in sorted(timers, key=lambda t: (t['observer_id'] is None, t['observer_id'])):
             # a timer with no schedule row still gets its own row
             for schedule in schedules.get(timer['observer_id']) or [{}]:
@@ -356,11 +351,13 @@ def samsung_wellbeing_app_timers(context):
                     timer['extended_time_limit'],
                     timer['observer_id'],
                     schedule.get('scheduleId'),
+                    user,
                 ))
 
     data_headers = (('Extended Time Stamp', 'datetime'), 'Timer Name', 'Packages',
                     'Daily Limit (minutes)', 'Schedule Days (as stored)', 'Schedule Enabled (as stored)',
-                    'Suspended (as stored)', 'Extended Time Limit (as stored)', 'Observer ID', 'Schedule ID')
+                    'Suspended (as stored)', 'Extended Time Limit (as stored)', 'Observer ID', 'Schedule ID',
+                    'Android User')
     return data_headers, data_list, '\n'.join(source_paths)
 
 
@@ -389,15 +386,16 @@ def samsung_wellbeing_app_timer_log(context):
         finally:
             db.close()
 
+        user = android_user(context.get_relative_path(file_found))
         for row_id, timestamp, _key, value in rows:
             value = value or ''
             match = _TIMER_LOG.match(value)
             if match:
                 data_list.append((_ms_to_utc(timestamp), match['packages'], int(match['remaining']),
-                                  int(match['used_min']), value, row_id))
+                                  int(match['used_min']), value, row_id, user))
             elif _LIMIT_REACHED in value:
-                data_list.append((_ms_to_utc(timestamp), '', '', '', value, row_id))
+                data_list.append((_ms_to_utc(timestamp), '', '', '', value, row_id, user))
 
     data_headers = (('Timestamp', 'datetime'), 'Packages', 'Remaining Usage (ms, parsed)',
-                    'usedInMin (parsed)', 'Log Value (as stored)', 'Log ID')
+                    'usedInMin (parsed)', 'Log Value (as stored)', 'Log ID', 'Android User')
     return data_headers, data_list, '\n'.join(source_paths)

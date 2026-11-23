@@ -123,6 +123,11 @@ password or personal recovery key, and a LUKS container with its passphrase, eac
 the same way. At a terminal whatever is missing is asked for, and the GUI asks in dialogs;
 a BitLocker, APFS or LUKS volume nothing opens is reported and not searched.
 
+A Signal on-device backup is listed without a key. Its messages, recipients and
+attachments open with the account's 64-character recovery key, given with
+`--signal_recovery_key_file` or `--signal_recovery_key_env`, or in the GUI with the
+Signal backup recovery key button. The key is held in memory for the run and is not saved.
+
 The disk images of a Linux software RAID set (md, or LVM2 across disks) are read
 together: give them all to `-i` with `-t raw`, or pick them together in the GUI's file
 dialog. Given one image that holds a member, the other members are looked for in its
@@ -213,6 +218,7 @@ The key of each entry (`get_cool_messages` above) must match the name of its dec
 Optional keys:
 
 - `html_columns`: columns written to the HTML report without escaping. Pass any value that comes from the evidence through the helpers in `scripts/html_safe.py`.
+- `multiline_columns`: Header names, as plain strings, whose line breaks show as `<br>` on the HTML report page. The cell is still escaped, and LAVA, TSV and timeline keep the plain newlines. A column also listed in `html_columns` follows `html_columns`.
 - `data_views`: alternate LAVA views, such as a conversation view for message artifacts. Column order for those is in [Conversation Column Order](admin/docs/conversation_column_order.md).
 - `sample_data`: a mapping of test corpus name to a short note about what that corpus produced. The artifact processor ignores it. See [Test data and sample_data for your PR](#test-data-and-sample_data-for-your-pr).
 

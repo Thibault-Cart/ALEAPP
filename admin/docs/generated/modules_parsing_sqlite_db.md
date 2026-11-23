@@ -37,6 +37,7 @@ This document outlines LEAPP modules parsing SQLite databases using the new `get
 | androidauto |
 | antennaPod |
 | appLock |
+| appOpsHistoryDb |
 | auroraStore |
 | avastCleanup |
 | avesGallery |
@@ -116,6 +117,8 @@ This document outlines LEAPP modules parsing SQLite databases using the new `get
 | samsungBadgeProvider |
 | samsungBatteryStats |
 | samsungBixbyRoutines |
+| samsungClock |
+| samsungContextEngine |
 | samsungFind |
 | samsungGalleryHistory |
 | samsungHealthMedication |
@@ -314,6 +317,7 @@ This document outlines LEAPP modules parsing SQLite databases using the new `get
 | googleCallScreen |
 | googleCast |
 | googleChat |
+| googleContactKeys |
 | googleDuo |
 | googleKeepNotes |
 | googleMapsGmm |
@@ -423,7 +427,9 @@ This document outlines LEAPP modules parsing SQLite databases using the new `get
 | vlcThumbs |
 | waze |
 | wellbeing |
+| whatsAppBusinessTools |
 | whatsAppExtended |
+| whatsAppStatus |
 | wireMessenger |
 | yahooMail |
 | zepplife |

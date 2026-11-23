@@ -16,11 +16,13 @@ import leapp_functions.app.history as history
 from scripts.search_files import *  # pylint: disable=wildcard-import,unused-wildcard-import
 from scripts.raw_image import FileSeekerRaw, cli_raw_input, input_text, logical_among, logical_refusal
 from scripts.ilapfuncs import *  # pylint: disable=wildcard-import,unused-wildcard-import
+from scripts.html_safe import esc
 from leapp_functions.app.output import validate_output_folder_available
 from scripts.version_info import leapp_name, leapp_version, check_runtime_dependencies
 from time import process_time, gmtime, strftime, perf_counter
 from scripts.lavafuncs import *  # pylint: disable=wildcard-import,unused-wildcard-import
 from scripts.context import Context
+from scripts import signal_backup
 
 # How many of the slowest artifacts to list at the end of a run. Enough to show a
 # pattern, short enough that nobody has to scroll past it.
@@ -219,6 +221,12 @@ def main():
     parser.add_argument('--bitlocker_key', required=False, action="append", default=[],
                         help='For a BitLocker volume in an image (-t raw): its startup key '
                              '(.BEK) file. Repeatable')
+    parser.add_argument('--signal_recovery_key_file', required=False, action="store",
+                        help='For a Signal on-device backup: read its 64-character recovery key from '
+                             'this file. Without a key the backup is listed but not decrypted')
+    parser.add_argument('--signal_recovery_key_env', required=False, action="store",
+                        help='For a Signal on-device backup: take its recovery key from this '
+                             'environment variable')
     parser.add_argument('-w', '--wrap_text', required=False, action="store_false", default=True,
                         help='Do not wrap text for output of data files')
     parser.add_argument('-m', '--load_profile', required=False, action="store", help="Path to ALEAPP Profile file (.alprofile).")
@@ -416,6 +424,19 @@ def main():
         # what was found beside the image given, and any image given twice
         found_members = raw_input
 
+    # Held in memory for this run only; never written to a profile, the log or the report.
+    if args.signal_recovery_key_file and args.signal_recovery_key_env:
+        print('Give the Signal recovery key once: a file or an environment variable, not both.')
+        return
+    try:
+        if args.signal_recovery_key_file:
+            signal_backup.set_recovery_key(signal_backup.key_from_file(args.signal_recovery_key_file))
+        elif args.signal_recovery_key_env:
+            signal_backup.set_recovery_key(signal_backup.key_from_env(args.signal_recovery_key_env))
+    except ValueError as exc:
+        print(exc)
+        return
+
     out_params = OutputParameters(output_path, custom_output_folder)
     Context.set_output_params(out_params)
 
@@ -535,7 +556,7 @@ def crunch_artifacts(
         logfunc('\n--------------------------------------------------------------------------------------')
 
         log = open(os.path.join(out_params.output_folder_base, '_HTML', '_Script_Logs', 'ProcessedFilesLog.html'), 'w+', encoding='utf8')
-        log.write(f'Extraction/Path selected: {input_path}<br><br>')
+        log.write(f'Extraction/Path selected: {esc(input_path)}<br><br>')
         
         parsed_modules = 0
         plugin_run_times = []
@@ -558,7 +579,7 @@ def crunch_artifacts(
                 search_regexes = [plugin.search]
             files_found = []
             found_already = set()
-            log.write(f'<b>For {plugin.name} module</b>')
+            log.write(f'<b>For {esc(plugin.name)} module</b>')
             for artifact_search_regex in search_regexes:
                 artifact_search_pattern_id += 1
                 lava_insert_sqlite_artifact_search_pattern(
@@ -566,14 +587,14 @@ def crunch_artifacts(
                 pattern_already_searched = artifact_search_regex in seeker.searched
                 found = seeker.search(artifact_search_regex)
                 if not found:
-                    log.write(f'<ul><li>No file found for regex <i>{artifact_search_regex}</i></li></ul>')
+                    log.write(f'<ul><li>No file found for regex <i>{esc(artifact_search_regex)}</i></li></ul>')
                 else:
-                    log.write(f'<ul><li>{len(found)} {"files" if len(found) > 1 else "file"} for regex <i>{artifact_search_regex}</i> located at:')
+                    log.write(f'<ul><li>{len(found)} {"files" if len(found) > 1 else "file"} for regex <i>{esc(artifact_search_regex)}</i> located at:')
                     for pathh in found:
                         # Strip \\?\ only for log display; file_infos is keyed with the
                         # original long-path form on Windows.
                         display_path = pathh[4:] if pathh.startswith('\\\\?\\') else pathh
-                        log.write(f'<ul><li>{Context.get_relative_path(display_path)}</li></ul>')
+                        log.write(f'<ul><li>{esc(Context.get_relative_path(display_path))}</li></ul>')
                         if seeker.file_infos.get(pathh):
                             file_path_id = id(seeker.file_infos.get(pathh))
                             if not pattern_already_searched and file_path_id not in file_path_ids:

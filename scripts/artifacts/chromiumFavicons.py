@@ -1,7 +1,10 @@
 import datetime
+import filecmp
 import hashlib
 import os
+import shutil
 import sqlite3
+import tempfile
 
 from scripts.artifacts.chrome import get_browser_name
 from scripts.ilapfuncs import artifact_processor, check_in_embedded_media, logfunc, \
@@ -11,6 +14,7 @@ from scripts.ilapfuncs import artifact_processor, check_in_embedded_media, logfu
 # names of the persisted values.
 _ICON_TYPES = {1: 'kFavicon', 2: 'kTouchIcon', 4: 'kTouchPrecomposedIcon', 8: 'kWebManifestIcon'}
 _PAGE_URL_TYPES = {0: 'kRegular', 1: 'kRedirect'}
+_SQLITE_READONLY_ROLLBACK = 776
 
 _CC = 'https://github.com/chromium/chromium/blob/33f34ef179f55596f6c2fc8a55878b7ccf6276e4'
 
@@ -25,7 +29,7 @@ __artifacts_v2__ = {
                        "the package.",
         "author": "@AlexisBrignoni, Claude",
         "creation_date": "2026-11-13",
-        "last_update_date": "2026-11-13",
+        "last_update_date": "2026-11-21",
         "requirements": "none",
         "category": "Chromium",
         "notes": "One row per icon_mapping row, which Chromium's source describes as a page URL "
@@ -71,7 +75,7 @@ __artifacts_v2__ = {
                  "artifact checks for the column, not the version, and a column the table lacks is "
                  "read as blank. On the tested images the Chrome, Brave and Edge databases at "
                  "version 9 carried it and it was set on every row (hc_pixel8pro_a16, "
-                 "hc_pixel8pro_a17, anne_a15, kevin_pocox7_a15, samsunga53_a14); the version 8 "
+                 "hc_pixel8pro_a17, anne_a15, kevin_pocox7_a15, samsunga53_a14, dragna_pixel9a_a16); the version 8 "
                  "Chrome, Brave, Edge and Opera databases (hickman_a13, pixel7a_a14, russell_a14, "
                  "and the Chrome databases on sharon_a14 and cookbook_a11) lacked it and every row "
                  "is blank. Samsung Internet numbers its database differently: version 10 carried "
@@ -85,10 +89,12 @@ __artifacts_v2__ = {
                  "same SHA1 are read once, which took samsunga53_a14 from 162 rows to 54 and "
                  "hickman_a13 from 286 to 143. A file under another user (/data/user/<n>) adds its "
                  "own rows when its bytes differ, as on russell_a14 and cookbook_a11; the "
-                 "comparison covers the Favicons file only, not its journal. A Favicons database "
-                 "held open by a pending rollback journal is not read: on russell_a14 one Brave "
-                 "database (a second user) was skipped for that reason and the run log says so. "
-                 "Source File is the path of the copy that was read and is the column that "
+                 "comparison covers the Favicons file only, not its journal. A Favicons or History "
+                 "database with a pending rollback journal is read from a temporary copy, where "
+                 "SQLite rolls the journal back, so its rows show the database with the journal's pages restored. That is the state before the unfinished write when the journal belongs to the file's last write, and the integrity check does not establish that. The rolled-back copy is used only if it passes SQLite's integrity check. Otherwise the file as found is used if it passes, with the journal ignored and the run log saying so. A file read this way can hold part of an unfinished write, and its rows are not marked in the report. The database is not read if neither passes, and the run log says so. Those two branches were exercised on constructed test databases, not on a corpus image. The artifact does not write to the evidence files, and the run log names each database read this way. The rollback read was exercised on Favicons databases on dragna_pixel9a_a16 "
+                 "(Chrome, 32 rows) and russell_a14 (Brave, a second user, 14 rows); a History "
+                 "database with a pending journal was not exercised. "
+                 "Source File is the extraction path of the Favicons file the rows came from and is the column that "
                  "separates users. Values not reported include the favicon_bitmaps rows of icons "
                  "that no page URL maps to (none on the tested images).",
         "paths": (
@@ -109,8 +115,9 @@ __artifacts_v2__ = {
             "hickman_a13": "Android 13 | 143 rows (Chrome, Brave, Edge)",
             "sharon_a14": "Android 14 | 182 rows (Chrome, Samsung Internet)",
             "pixel7a_a14": "Android 14 | 78 rows (Chrome, Brave, Edge)",
-            "russell_a14": "Android 14 | 49 rows (Chrome, two users; one Brave database skipped, "
-                           "pending journal)",
+            "dragna_pixel9a_a16": "Android 16 | 32 rows (Chrome, read after journal rollback)",
+            "russell_a14": "Android 14 | 63 rows (Chrome, two users; Brave read after journal "
+                           "rollback)",
             "cookbook_a11": "Android 11 | 134 rows (Chrome, Samsung Internet across two users)",
             "anne_a15": "Android 15 | 111 rows (Chrome, Samsung Internet)",
             "kevin_pocox7_a15": "Android 15 | 60 rows (Chrome)",
@@ -168,21 +175,99 @@ def _dedupe_identical(paths):
     return list(by_hash.values())
 
 
-def _history_urls(history_file):
-    '''The url set of a History database's urls table, or None when it cannot be read.'''
-    db = open_sqlite_db_readonly(history_file)
-    if db is None:
-        return None
+def _needs_rollback(error, journal):
+    '''True for SQLITE_READONLY_ROLLBACK with a non-empty journal beside the database.'''
+    code = getattr(error, 'sqlite_errorcode', None)
+    matches = code == _SQLITE_READONLY_ROLLBACK if code is not None else 'readonly' in str(error)
+    return matches and os.path.isfile(journal) and os.path.getsize(journal) > 0
+
+
+def _integrity_ok(db):
+    '''True when SQLite's integrity check passes on an open database.'''
     try:
-        if 'urls' not in {row[0] for row in db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'")}:
-            return None
-        return {row[0] for row in db.execute('SELECT url FROM urls')}
-    except sqlite3.Error as ex:
-        logfunc(f'Chromium Favicons: could not read {history_file}: {ex}')
-        return None
+        row = db.execute('PRAGMA integrity_check(1)').fetchone()
+    except sqlite3.DatabaseError:
+        return False
+    return bool(row) and row[0] == 'ok'
+
+
+def _read_rolled_back(copy, path, reader):
+    '''(True, reader(db)) when SQLite restored pages to the copy and the result is sound.
+
+    SQLite can delete a journal it decides not to play back, so a rollback is established by
+    the copy's bytes differing from the evidence file after the read.
+    '''
+    db = sqlite3.connect(copy)
+    try:
+        if not _integrity_ok(db):
+            return False, None
+        result = reader(db)
+    except sqlite3.DatabaseError:
+        return False, None
     finally:
         db.close()
+    return not filecmp.cmp(copy, path, shallow=False), result
+
+
+def _read_database(path, reader, label):
+    '''(reader(db), the journal path if one was rolled back) for the database at path.
+
+    SQLite must roll a hot journal back before it can read, which a read-only open
+    cannot do. In that case the database and its journal are copied to a temporary
+    folder and read there, so SQLite rolls back the copy and the evidence is not changed.
+    A stale journal can damage a sound database, so the rolled-back copy is used only if
+    it passes SQLite's integrity check. Otherwise the file as found is used if it passes,
+    and the read is refused if neither does.
+    '''
+    db = open_sqlite_db_readonly(path)
+    if db is None:
+        return None, None
+    journal = f'{path}-journal'
+    try:
+        return reader(db), None
+    except sqlite3.OperationalError as ex:
+        if not _needs_rollback(ex, journal):
+            raise
+    finally:
+        db.close()
+    with tempfile.TemporaryDirectory() as folder:
+        copy = os.path.join(folder, 'database')
+        shutil.copyfile(path, copy)
+        shutil.copyfile(journal, f'{copy}-journal')
+        rolled_back, result = _read_rolled_back(copy, path, reader)
+        if rolled_back:
+            logfunc(f'Chromium Favicons: {label} had a pending rollback journal; read from a '
+                    'temporary copy after SQLite rolled it back')
+            return result, journal
+        as_found = os.path.join(folder, 'as_found')
+        shutil.copyfile(path, as_found)
+        db = sqlite3.connect(as_found)
+        try:
+            if not _integrity_ok(db):
+                raise sqlite3.DatabaseError('neither the rolled-back copy nor the file as found '
+                                            'passed the integrity check')
+            result = reader(db)
+        finally:
+            db.close()
+    logfunc(f'Chromium Favicons: {label} had a pending rollback journal that did not give a sound '
+            'database; read as found, with the journal ignored')
+    return result, None
+
+
+def _read_urls(db):
+    if 'urls' not in {row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}:
+        return None
+    return {row[0] for row in db.execute('SELECT url FROM urls')}
+
+
+def _history_urls(history_file, label):
+    '''(url set or None when it cannot be read, the journal path if one was rolled back).'''
+    try:
+        return _read_database(history_file, _read_urls, label)
+    except (sqlite3.Error, OSError) as ex:
+        logfunc(f'Chromium Favicons: could not read {history_file}: {ex}')
+        return None, None
 
 
 def _bitmaps(db):
@@ -208,6 +293,19 @@ def _bitmaps(db):
     return icons
 
 
+def _read_favicons(db):
+    '''(mapping rows, icons), or None when a required table is missing.'''
+    mapping = _columns(db, 'icon_mapping')
+    if not mapping or not _columns(db, 'favicons') or not _columns(db, 'favicon_bitmaps'):
+        return None
+    url_type = 'm.page_url_type' if 'page_url_type' in mapping else 'NULL'
+    rows = db.execute(
+        f'SELECT m.page_url, m.icon_id, f.url, f.icon_type, {url_type} '
+        'FROM icon_mapping m LEFT JOIN favicons f ON f.id = m.icon_id '
+        'ORDER BY m.id').fetchall()
+    return rows, _bitmaps(db)
+
+
 @artifact_processor
 def chromiumFavicons(context):
     data_headers = (('Last Updated', 'datetime'), ('Last Requested', 'datetime'), 'Page URL',
@@ -220,35 +318,31 @@ def chromiumFavicons(context):
     data_list = []
     sources = []
     for file_found in favicons:
-        db = open_sqlite_db_readonly(file_found)
-        if db is None:
-            continue
         try:
-            mapping = _columns(db, 'icon_mapping')
-            if not mapping or not _columns(db, 'favicons') or not _columns(db, 'favicon_bitmaps'):
-                logfunc(f'Chromium Favicons: {file_found} has no icon_mapping, favicons or '
-                        'favicon_bitmaps table')
-                continue
-            url_type = 'm.page_url_type' if 'page_url_type' in mapping else 'NULL'
-            rows = db.execute(
-                f'SELECT m.page_url, m.icon_id, f.url, f.icon_type, {url_type} '
-                'FROM icon_mapping m LEFT JOIN favicons f ON f.id = m.icon_id '
-                'ORDER BY m.id').fetchall()
-            icons = _bitmaps(db)
-        except sqlite3.Error as ex:
+            result, journal = _read_database(file_found, _read_favicons,
+                                             context.get_relative_path(file_found))
+        except (sqlite3.Error, OSError) as ex:
             logfunc(f'Chromium Favicons: could not read {file_found}: {ex}')
             continue
-        finally:
-            db.close()
+        if result is None:
+            logfunc(f'Chromium Favicons: {file_found} could not be opened or has no icon_mapping, '
+                    'favicons or favicon_bitmaps table')
+            continue
+        rows, icons = result
 
         sources.append(file_found)
+        if journal:
+            sources.append(journal)
         browser = get_browser_name(file_found)
         if 'app_sbrowser' in file_found:
             browser = 'Browser'
         history_file = histories.get(os.path.dirname(file_found))
-        urls = _history_urls(history_file) if history_file else None
+        urls, history_journal = (_history_urls(history_file, context.get_relative_path(history_file))
+                                 if history_file else (None, None))
         if history_file and urls is not None:
             sources.append(history_file)
+            if history_journal:
+                sources.append(history_journal)
         relative = context.get_relative_path(file_found)
         for page_url, icon_id, icon_url, icon_type, page_url_type in rows:
             updated, requested, sizes, largest = icons.get(icon_id, (0, 0, [], None))

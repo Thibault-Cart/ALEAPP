@@ -4,7 +4,7 @@ __artifacts_v2__ = {
         "description": "Parses emails from Gmail",
         "author": "Alexis Brignoni, Patrick Dalla, @stark4n6; @AlexisBrignoni, Codex",
         "creation_date": "2023-01-04",
-        "last_update_date": "2026-10-09",
+        "last_update_date": "2026-11-22",
         "requirements": "BeautifulSoup",
         "category": "Email",
         "notes": "Recipient and Recipient Name are protobuf fields 1.2 and 1.3, Reply To and "
@@ -19,9 +19,20 @@ __artifacts_v2__ = {
                  "columns blank; an unrecognized field 11 type is logged and those columns "
                  "are blank while the otherwise decoded row is retained. The original protobuf "
                  "stays in the source database. Message is the readable text extracted from the stored "
-                 "HTML body (tags, styling and repeated whitespace removed). Each link's place in "
-                 "the text is marked [n], and Links lists the link targets by those numbers, as "
-                 "stored; a repeated target keeps its first number. A link with no words of its "
+                 "HTML body. Tags, comments and the text of closed style and script elements are "
+                 "removed. A style or script that is never closed keeps its text. Line breaks are "
+                 "placed at br and block tags. Text the message hides with styling is still reported. "
+                 "Soft hyphens and the zero-width characters U+200B, U+200C, U+200D, U+FEFF and U+034F"
+                 " show as a space. Other invisible characters are kept as stored. Each link is marked"
+                 " [n], and Links lists the link targets by those numbers as Python's HTML parser "
+                 "returns them, with character references decoded, so a target can differ from the "
+                 "stored href text. Malformed HTML that the parser refuses is reported as stored. How a bare ampersand or malformed HTML is read changes between "
+                 "Python versions, so Message and Links can differ between versions for such bodies. A"
+                 " repeated target keeps its first number. An empty or short Message does not show the"
+                 " message had no text: check the stored HTML. Removing comments and style and script "
+                 "text was exercised on constructed bodies only: no body in five corpus runs (854 "
+                 "rows) held a comment or such an element. "
+                 "A link with no words of its "
                  "own, such as a linked image, still gets a marker, so the words just before a "
                  "marker are not always the link's text. The "
                  "unmodified body stays in the source database. The app keeps one "
@@ -45,6 +56,7 @@ __artifacts_v2__ = {
                  "without dropping the other accounts' rows.",
         "paths": ('*/com.google.android.gm/databases/bigTopDataDB.*','*/com.google.android.gm/files/downloads/*/attachments/*/*.*','*/com.google.android.gm/shared_prefs/Gmail.xml'),
         "output_types": "standard",
+        "multiline_columns": ["Message", "Links"],
         "artifact_icon": "inbox",
         "sample_data": {
             "anne_a15": "Android 15 | com.google.android.gm vc 65346694 | 200 rows",
@@ -138,7 +150,11 @@ import sqlite3
 import zlib
 from datetime import datetime, timezone
 
-from bs4 import BeautifulSoup, NavigableString
+from html.parser import HTMLParser
+
+from bs4 import BeautifulSoup, CData, NavigableString
+from bs4.builder import ParserRejectedMarkup
+from bs4.element import PreformattedString, Tag
 
 from scripts.artifacts.gmail import _parse_xml
 from scripts.artifacts.storagePathViews import canonical_path, unique_files
@@ -148,20 +164,53 @@ from scripts.ilapfuncs import open_sqlite_db_readonly, check_in_media, get_sqlit
 
 # whitespace plus the invisible padding characters observed in marketing preheaders
 _WHITESPACE_RUN = re.compile(r'[\s\u00ad\u034f\u200b\u200c\u200d\ufeff]+')
+_LINE_END = re.compile(r'\r\n|\r|\n')
+_NON_DISPLAY_TAGS = ('script', 'style')
+_CELL_TAGS = ('td', 'th')
+_BLOCK_TAGS = ('address', 'article', 'aside', 'blockquote', 'center', 'dd', 'details', 'div', 'dl',
+               'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4',
+               'h5', 'h6', 'header', 'hr', 'li', 'main', 'nav', 'ol', 'p', 'pre', 'section',
+               'table', 'title', 'tr', 'ul')
+
+
+class _LineBreak(NavigableString):
+    """A marker placed in the parsed tree. It is not evidence text and is never emitted."""
 
 
 def body_text_and_links(html_body):
     """The readable text of an HTML body plus the link targets it carries.
 
-    Tags are dropped and whitespace runs (including the zero-width padding marketing
+    Tags and the contents of closed style and script elements are dropped. A br or block element
+    ends a line, table cells are separated by a space and text inside pre keeps its
+    lines. Within a line, whitespace runs (including the zero-width padding marketing
     mail hides its preheader behind) collapse to one space. Each link's place in the
     text is marked [n], and the second value lists the targets by those numbers, as
-    stored. A repeated target keeps its first number. A link with no words of its own,
+    the parser returns them. A repeated target keeps its first number. A link with no words of its own,
     such as a linked image, still gets a marker, so the words just before a marker are
     not always the link's text."""
     if not html_body:
         return '', ''
-    soup = BeautifulSoup(html_body, 'html.parser')
+    source = html_body.decode('utf-8', 'replace') if isinstance(html_body, bytes) else str(html_body)
+    try:
+        scan = HTMLParser()
+        scan.feed(source)
+        # A style or script left open holds the rest of the body. Closing it for the parse keeps
+        # that text on Python versions that would otherwise drop it at the end of the input.
+        open_element = scan.cdata_elem if scan.cdata_elem in _NON_DISPLAY_TAGS else None
+        closer = f'</{open_element}>' if open_element else ''
+        soup = BeautifulSoup(html_body + (closer.encode() if isinstance(html_body, bytes) else closer),
+                             'html.parser')
+    except (AssertionError, ParserRejectedMarkup):
+        # Some Python versions refuse malformed markup. One body must not stop the artifact,
+        # so the body is reported as stored.
+        return source, ''
+    for name in _NON_DISPLAY_TAGS:
+        found = soup.find_all(name)
+        # The scan and the tree can disagree on malformed input, so the element may be absent.
+        if name == open_element and found:
+            found.pop()
+        for hidden in found:
+            hidden.extract()
     targets = []
     numbers = {}
     for anchor in soup.find_all('a', href=True):
@@ -172,7 +221,36 @@ def body_text_and_links(html_body):
             targets.append(href)
             numbers[href] = len(targets)
         anchor.append(NavigableString(f' [{numbers[href]}]'))
-    text = _WHITESPACE_RUN.sub(' ', soup.get_text(separator=' ')).strip()
+    for tag in soup.find_all(_BLOCK_TAGS):
+        tag.insert(0, _LineBreak(''))
+        tag.append(_LineBreak(''))
+    for tag in soup.find_all(_CELL_TAGS):
+        tag.append(NavigableString(' '))
+    has_pre = soup.find('pre') is not None
+    lines = [[]]
+    for node in soup.descendants:
+        if isinstance(node, _LineBreak):
+            # A block edge ends a line that has text. It never makes a blank line by itself.
+            if _WHITESPACE_RUN.sub('', ''.join(lines[-1])):
+                lines.append([])
+            else:
+                lines[-1] = []
+        elif isinstance(node, Tag) and node.name == 'br':
+            lines.append([])
+        elif isinstance(node, NavigableString) and (
+                isinstance(node, CData) or not isinstance(node, PreformattedString)):
+            if has_pre and node.find_parent('pre') is not None:
+                first, *rest = _LINE_END.split(str(node))
+                lines[-1].append(first)
+                lines.extend([line] for line in rest)
+            else:
+                lines[-1].append(str(node))
+    kept = []
+    for line in lines:
+        line = _WHITESPACE_RUN.sub(' ', ''.join(line)).strip()
+        if line or (kept and kept[-1]):  # one blank line at most, none at the start
+            kept.append(line)
+    text = '\n'.join(kept).rstrip('\n')
     links = '\n'.join(f'[{number}] {target}' for number, target in enumerate(targets, 1))
     return text, links
 

@@ -1,18 +1,14 @@
 __artifacts_v2__ = {
     "sdhmsBatteryAppHistory": {
         "name": "SDHMS Battery App History",
-        "description": "Per-app usage recorded in time windows by the Samsung Device Health "
-                       "Manager Service (sec_batterystats_history, APP_HISTORY table): power "
-                       "drain, foreground/background time, CPU, wakelocks, network packets, "
-                       "GPS and audio use per uid.",
+        "description": "Per-UID usage in time windows from the sec_batterystats_history database of com.sec.android.sdhms (APP_HISTORY table): power, foreground/background time, CPU, wakelocks, network packets, GPS and audio use.",
         "author": "@abrignoni",
         "creation_date": "2026-07-30",
-        "last_update_date": "2026-07-30",
+        "last_update_date": "2026-11-22",
         "requirements": "none",
         "category": "Samsung Device Health Management Service",
         "notes": "Window Start and Window End are start_time and end_time read as Unix "
-                 "milliseconds. The duration columns are labelled in milliseconds; that unit "
-                 "is not sourced here. Where the database has no bluetooth_scan column the "
+                 "milliseconds. Foreground Time, Background Time, CPU Time, Wakelock Time, GPS Time and Audio Time are fg_time, bg_time, cpu_time, wakelock_time, gps_time and audio_time as stored. Their unit is not established. Where the database has no bluetooth_scan column the "
                  "Bluetooth Scan column is empty.",
         "paths": ('*/com.sec.android.sdhms/databases/sec_batterystats_history*',),
         "output_types": "standard",
@@ -27,17 +23,14 @@ __artifacts_v2__ = {
     },
     "sdhmsBatteryDeviceHistory": {
         "name": "SDHMS Battery Device History",
-        "description": "Device-wide screen and discharge figures recorded in time windows by "
-                       "the Samsung Device Health Manager Service (sec_batterystats_history, "
-                       "DEVICE_HISTORY table).",
+        "description": "Device-wide screen and discharge figures in time windows from the sec_batterystats_history database of com.sec.android.sdhms (DEVICE_HISTORY table).",
         "author": "@abrignoni",
         "creation_date": "2026-07-30",
-        "last_update_date": "2026-07-30",
+        "last_update_date": "2026-11-22",
         "requirements": "none",
         "category": "Samsung Device Health Management Service",
         "notes": "Window Start and Window End are start_time and end_time read as Unix "
-                 "milliseconds. Screen On Time and Screen Off Time are labelled in "
-                 "milliseconds; that unit is not sourced here. Where the database has no "
+                 "milliseconds. Screen On Time, Screen Off Time, High Brightness Time and High Refresh Time are reported as stored. Their unit is not established. Where the database has no "
                  "screen_on_count column the Screen On Count, High Brightness Time and High "
                  "Refresh Time columns are empty.",
         "paths": ('*/com.sec.android.sdhms/databases/sec_batterystats_history*',),
@@ -53,16 +46,15 @@ __artifacts_v2__ = {
     },
     "sdhmsBatteryEventHistory": {
         "name": "SDHMS Battery Event History",
-        "description": "Battery events recorded by the Samsung Device Health Manager Service "
-                       "(sec_batterystats_history, BATTERY_EVENT_HISTORY table). Event type "
+        "description": "Battery events from the sec_batterystats_history database of com.sec.android.sdhms (BATTERY_EVENT_HISTORY table). Event type "
                        "and value are stored as integers whose meaning is not established, "
                        "so they are reported as stored.",
         "author": "@abrignoni",
         "creation_date": "2026-07-30",
-        "last_update_date": "2026-07-30",
+        "last_update_date": "2026-11-22",
         "requirements": "none",
         "category": "Samsung Device Health Management Service",
-        "notes": "Where the table has no id column the ID column is empty.",
+        "notes": "Update Time is update_time read as Unix milliseconds. Where the table has no id column the ID column is empty.",
         "paths": ('*/com.sec.android.sdhms/databases/sec_batterystats_history*',),
         "output_types": "standard",
         "artifact_icon": "battery",
@@ -76,16 +68,19 @@ __artifacts_v2__ = {
     },
     "sdhmsBatterySystemHistory": {
         "name": "SDHMS Battery System History",
-        "description": "System power drain recorded in time windows by the Samsung Device "
-                       "Health Manager Service (sec_batterystats_history, SYSTEM_HISTORY "
-                       "table). The drain type is stored as a raw integer and is reported "
+        "description": "System power drain in time windows from the sec_batterystats_history database of com.sec.android.sdhms (SYSTEM_HISTORY table). The drain type is stored as a raw integer and is reported "
                        "as-is.",
         "author": "@abrignoni",
         "creation_date": "2026-07-30",
-        "last_update_date": "2026-07-30",
+        "last_update_date": "2026-11-22",
         "requirements": "none",
         "category": "Samsung Device Health Management Service",
-        "notes": "",
+        "notes": "Window Start and Window End are start_time and end_time read as Unix "
+                 "milliseconds. Used Time is the used_time column as stored. Its unit is not "
+                 "established. On samsungs20_a13, the 38 rows of one Drain Type hold values close "
+                 "to the window length in seconds, and the 10 rows of the other hold about 158 to "
+                 "1,001 times that length. On galaxys10_a10 no Drain Type follows that pattern, "
+                 "so do not carry it to another image.",
         "paths": ('*/com.sec.android.sdhms/databases/sec_batterystats_history*',),
         "output_types": "standard",
         "artifact_icon": "cpu",
@@ -147,15 +142,15 @@ def sdhmsBatteryAppHistory(context):
         'UID',
         'Power',
         'Screen Power',
-        'Foreground Time (ms)',
-        'Background Time (ms)',
-        'CPU Time (ms)',
-        'Wakelock Time (ms)',
+        'Foreground Time',
+        'Background Time',
+        'CPU Time',
+        'Wakelock Time',
         'Mobile Packets',
         'Wi-Fi Packets',
         'Wakeup Alarms',
-        'GPS Time (ms)',
-        'Audio Time (ms)',
+        'GPS Time',
+        'Audio Time',
         'Mobile Active',
         'Bluetooth Scan',
     )
@@ -190,13 +185,13 @@ def sdhmsBatteryDeviceHistory(context):
         ('Window End', 'datetime'),
         'All Power',
         'Screen Power',
-        'Screen On Time (ms)',
-        'Screen Off Time (ms)',
+        'Screen On Time',
+        'Screen Off Time',
         'Screen On Discharge',
         'Screen Off Discharge',
         'Screen On Count',
-        'High Brightness Time (ms)',
-        'High Refresh Time (ms)',
+        'High Brightness Time',
+        'High Refresh Time',
     )
     return data_headers, data_list, source_path
 
@@ -248,6 +243,6 @@ def sdhmsBatterySystemHistory(context):
         ('Window End', 'datetime'),
         'Drain Type',
         'Power',
-        'Used Time (ms)',
+        'Used Time',
     )
     return data_headers, data_list, source_path
